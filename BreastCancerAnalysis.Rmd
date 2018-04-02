@@ -1,0 +1,290 @@
+---
+title: "Breast Cancer Wisconsin Dataset"
+author: "Aravind"
+date: "April 2, 2018"
+output: md_document
+---
+
+Data Cancer Diagnosis
+======================
+
+## Dataset Overview
+
+The Breast Cancer (Wisconsin) dataset used in this paper is publicly available in the UCI machine learning repository and was created by Dr. William H. Wolberg, Dr. W. Nick Street, and Olvi L. Mangasarian. The doner is W. Nick Street. The dataset is created by Dr. Wolberg by taking suspected tumor samples via a thin needle from patient's solid breast masses and the samples are placed on dent-shaped glass slides. The slide is dent shaped in order to distinguish the nearby cells with the tumor cells. The collected tissue samples are then examined under microscope and features are computed from the digitized image of a fine needle aspirate (FNA) of breast mass. This is done via a graphical computer program, which is capable of performing the analysis of cytological features based on a digital scan.
+
+
+
+Dataset: [Breast Cancer (Wisconsin) dataset](http://archive.ics.uci.edu/ml/datasets/breast+cancer+wisconsin+%28diagnostic%29)
+
+This is a classification dataset consisting of:
+
+* 569 Instances
+* 32 features
+* No missing values
+
+The attributes are:
+
+1. ID number
+2. Diagnosis (M = malignant, B = benign)
+3. (3-32) Ten real-valued features are computed for each cell nucleus:
+  a) radius (mean of distances from center to points on the perimeter)
+  b) texture (standard deviation of gray-scale values)
+  c) perimeter
+  d) area
+  e) smoothness (local variation in radius lengths)
+  f) compactness (perimeter^2 / area - 1.0)
+  g) concavity (severity of concave portions of the contour)
+  h) concave points (number of concave portions of the contour)
+  i) symmetry
+  j) fractal dimension ("coastline approximation" - 1)
+
+
+## Analysis
+
+Three machine learning methods are compared in this paper based on the overall accuracy, misclassification error, and the area under the ROC curve. These classification methods are used to predict the diagnosis result of the breast cancer which can be either benign or malignant in nature. To create the classifier, the WBCD (Wisconsin Breast Cancer Diagnosis) dataset is used. The dataset is widely utilized for this kind of application because it has many instances, it is virtually noise-free and has no case of missing values. Prior to the analysis, a large fraction of this work will be dedicated for cleaning and pre-processing the data to optimize the classifier. The highly correlated features are identified and dimension reduction is done on the dataset. The first part of this work is to overview the database, what information does it contains, when and how it was created, if it is noisy, if it has missing values. This section is important to understand what are the issues that will need to be processed while preparing the data to create the classifier. The second part is to propose the machine learning methods and algorithms to optimize the training set and different solutions are proposed.
+
+
+### Required Packages
+
+```{r}
+library(dplyr)
+library(magrittr)
+library(corrplot)
+library(kernlab)
+library(pROC)
+library(rpart)
+library(MASS)
+library(caret)
+library(caTools)
+library(ranger)
+library(e1071)
+library(randomForest)
+library(tidyverse)
+```
+
+### Loading the data
+
+```{r}
+data <- read.csv(".//data.csv", header =TRUE)
+dim(data)
+head(data)
+str(data)
+```
+
+### Data Pre-Processing
+
+Looking at the data, we can remove the 33rd column since all values in this column are "NA". 
+Also, we can remove id column as it plays no part in predicting the diagnosis. Change the column number 2 into facor.
+
+```{r}
+data$diagnosis <- as.factor(data$diagnosis)
+cleaned_dataset <- data[,3:32]
+head(cleaned_dataset)
+str(cleaned_dataset)
+```
+
+### Data Visualization
+
+```{r}
+round(prop.table(table(data$diagnosis)), 2)
+```
+
+The data is slightly unbalanced with 67% of benignant nature and 37% of malignant phenomenon.
+
+Checking for coorelation using findcorrelation function from the caret package with cutoff of 90%.
+
+```{r}
+corr_mat <- round(cor(cleaned_dataset, method = "pearson"),1)
+df2 <- cleaned_dataset %>% 
+  dplyr::select(-findCorrelation(corr_mat, cutoff = 0.9))
+dim(df2)
+colnames(df2)
+colnames(cleaned_dataset)
+```
+
+Correlation Plot
+
+```{r}
+## Correlation plot for original dataset
+corrplot(corr_mat, tl.col = "black", method = "shade",type = "lower",mar=c(0,1,0,1), tl.srt = 40)
+```
+
+From the correlation plot, we can see that the dataset consists of highly correlated features, therefore some of the highly correlated features are to be removed.
+
+### Dimension Reduction
+
+```{r}
+df3 <- cleaned_dataset[,c(4,5,6,9,10,11,12,15,16,17,18,19,20,22,25,26,27,28,29,30)]
+dim(df3)
+
+## Correlation plot for cleaned dataset
+corrplot(round(cor(df3),1), tl.col = "black", method = "shade", type = "lower",mar=c(0,1,0,1), tl.srt = 40)
+```
+
+
+### Training and Testing dataset
+
+```{r}
+df4 <- cbind(diagnosis = data$diagnosis, df3)
+head(df4)
+str(df4)
+set.seed(1234)
+data_index <- createDataPartition(df4$diagnosis, p=0.7, list = FALSE)
+train_data <- df4[data_index,]
+test_data <- df4[-data_index,]
+```
+
+### Principle Component Analysis
+
+```{r}
+PCA_Graph <- prcomp(cleaned_dataset, center = TRUE, scale = TRUE)
+plot(PCA_Graph, type="l", main = " ")
+grid(nx = 10, ny = 14)
+title(main = "Principal components Analysis", sub = NULL, xlab = "Components")
+box()
+summary(PCA_Graph)
+```
+
+The first 10 PCA's account for 95% of the information, and 17 PCA,s account for 99% of the information.
+
+### Machine learning models
+
+```{r}
+## Threshold for pca preprocess = 0.99
+fitControl <- trainControl(method="cv",
+                           number = 5,
+                           preProcOptions = list(thresh = 0.99),
+                           classProbs = TRUE,
+                           summaryFunction = twoClassSummary)
+```
+
+## Supply Vector Machine(SVM) Radial
+
+```{r}
+model_svm <- train(diagnosis~.,
+                   train_data,
+                   method="svmRadial",
+                   metric="ROC",
+                   preProcess=c('center', 'scale'),
+                   trace=FALSE,
+                   trControl=fitControl)
+pred_svm <- predict(model_svm, test_data)
+cm_svm <- confusionMatrix(pred_svm, test_data$diagnosis, positive = "M")
+cm_svm
+```
+
+The Supply Vector Machine Radial model has an prediction accuracy of 0.9765
+
+```{r}
+## ROC Curve
+pred_prob_R <- predict(model_svm, test_data, type="prob")
+roc_R <- roc(test_data$diagnosis, pred_prob_R$M)
+plot(roc_R)
+colAUC(pred_prob_R, test_data$diagnosis, plotROC=TRUE)
+```
+
+## Supply Vector Machine(SVM) Poly
+
+```{r}
+model_svm2 <- train(diagnosis~.,
+                    train_data,
+                    method="svmPoly",
+                    metric="ROC",
+                    preProcess=c('center', 'scale'),
+                    trace=FALSE,
+                    trControl=fitControl)
+pred_svm2 <- predict(model_svm2, test_data)
+cm_svm2 <- confusionMatrix(pred_svm2, test_data$diagnosis, positive = "M")
+cm_svm2
+```
+
+The Supply Vector Machine Poly model has an prediction accuracy of 0.9471
+
+```{r}
+## ROC curve
+pred_prob_P <- predict(model_svm2, test_data, type="prob")
+roc_P <- roc(test_data$diagnosis, pred_prob_P$M)
+plot(roc_P)
+colAUC(pred_prob_P, test_data$diagnosis, plotROC=TRUE)
+```
+
+## K-Nearest Neighbour 
+
+```{r}
+model_knn <- train(diagnosis~.,
+                   train_data,
+                   method="knn",
+                   metric="ROC",
+                   preProcess = c('center', 'scale'),
+                   tuneLength=10,
+                   trControl=fitControl)
+pred_knn <- predict(model_knn, test_data)
+cm_knn <- confusionMatrix(pred_knn, test_data$diagnosis, positive = "M")
+cm_knn
+```
+
+The K - Nearest Neighbour (KNN) model has an prediction accuracy of 0.9588
+
+```{r}
+## ROC Curve
+pred_prob_knn <- predict(model_knn, test_data, type="prob")
+roc_knn <- roc(test_data$diagnosis, pred_prob_knn$M)
+plot(roc_knn)
+colAUC(pred_prob_knn, test_data$diagnosis, plotROC=TRUE)
+```
+
+## Random Forest
+
+```{r}
+model_rf <- train(diagnosis~.,
+                  train_data,
+                  method="ranger",
+                  metric="ROC",
+                  tuneLength=10,
+                  preProcess = c('center', 'scale'),
+                  trControl=fitControl)
+
+pred_rf <- predict(model_rf, test_data)
+cm_rf <- confusionMatrix(pred_rf, test_data$diagnosis, positive = "M")
+cm_rf
+```
+
+The Random Forest model has an prediction accuracy of 0.9647
+
+```{r}
+## ROC Curve
+pred_prob_rf <- predict(model_rf, test_data, type="prob")
+roc_rf <- roc(test_data$diagnosis, pred_prob_rf$M)
+plot(roc_rf)
+colAUC(pred_prob_rf, test_data$diagnosis, plotROC=TRUE)
+```
+
+## Neural Networks LDA 
+
+```{r}
+model_lda <- train(diagnosis~.,data=train_data,
+                   method="lda2",
+                   metric="ROC",
+                   preProc = c("center", "scale"),
+                   tuneLength=10,
+                   trace=FALSE,
+                   trControl=fitControl)
+pred_lda <- predict(model_lda, test_data)
+cm_lda <- confusionMatrix(pred_lda, test_data$diagnosis, positive = "M")
+cm_lda
+```
+
+The Neural Network LDA model has an prediction accuracy of 0.9588
+
+```{r}
+## ROC Curve
+pred_prob_lda <- predict(model_lda, test_data, type="prob")
+roc_lda <- roc(test_data$diagnosis, pred_prob_lda$M)
+plot(roc_lda)
+colAUC(pred_prob_lda, test_data$diagnosis, plotROC=TRUE)
+```
+
+### Conclusion
+
+In this project the SVM, KNN, Random Forests, and Neural Networks have been discussed in providing diagnostic assessment for breast cancer. The SVM with radial model has been determined to be more superior compared to the other models since it provides higher prediction accuracy, higher sensitivity, higher Kappa value, and lower misclassification error rate.
+
